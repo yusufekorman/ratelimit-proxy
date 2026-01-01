@@ -230,11 +230,21 @@ app.post("/ratelimit", async (req, reply) => {
    HEALTH CHECK
 ======================= */
 app.get("/health", async () => {
-  // get all rl:* keys
+  // get all rl:* keys and values from redis or memory
 
-  const keys = redisConnected ? await redis!.keys("rl:*") : [];
+  const keys: Record<string, any> = {};
+  if (redis && redisConnected) {
+    const redisKeys = await redis.keys("rl:*");
 
-  console.log(`[HEALTH CHECK] Rate limit keys count: ${keys.length}`);
+    const redisValues = await redis.mget(...redisKeys);
+    redisKeys.forEach((k, i) => {
+      keys[k] = redisValues[i];
+    });
+  } else {
+    for (const [k, v] of memoryStore) {
+      keys[`rl:${k}`] = v;
+    }
+  }
 
   return {
     status: "ok",
