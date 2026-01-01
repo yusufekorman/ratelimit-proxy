@@ -236,10 +236,12 @@ app.get("/health", async () => {
   if (redis && redisConnected) {
     const redisKeys = await redis.keys("rl:*");
 
-    const redisValues = await redis.mget(...redisKeys);
-    redisKeys.forEach((k, i) => {
-      keys[k] = redisValues[i];
-    });
+    if (redisKeys.length > 0) {
+      const redisValues = await redis.mget(...redisKeys);
+      redisKeys.forEach((k, i) => {
+        keys[k] = redisValues[i];
+      });
+    }
   } else {
     for (const [k, v] of memoryStore) {
       keys[`rl:${k}`] = v;
