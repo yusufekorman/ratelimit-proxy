@@ -172,6 +172,15 @@ app.addHook("onRequest", async (req, reply) => {
    AUTH + HMAC GUARD
 ======================= */
 app.addHook("preHandler", async (req, reply) => {
+  // Health endpoint için sadece Bearer token yeterli
+  if (req.routeOptions.url === "/health") {
+    const auth = req.headers.authorization;
+    if (!auth || auth !== `Bearer ${SHARED_SECRET}`) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+    return; // Diğer kontrolleri atla
+  }
+
   const auth = req.headers.authorization;
   const ts = Number(req.headers["x-timestamp"]);
   const sig = req.headers["x-signature"];
