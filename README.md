@@ -6,7 +6,6 @@ This project is a high-performance rate limit proxy based on Redis. It protects 
 
 - **Redis + In-Memory Fallback**: Automatically switches to in-memory if Redis is down.
 - **HMAC Security**: Validates requests with HMAC signatures (protection against replay attacks).
-- **IP Detection**: Supports Cloudflare, X-Forwarded-For, etc. headers.
 - **Performance Optimization**: Atomic rate limiting with Lua scripts.
 - **Joi Validation**: Uses Joi for request validation.
 - **Health Check**: `/health` endpoint for status monitoring.
@@ -74,10 +73,10 @@ This project is a high-performance rate limit proxy based on Redis. It protects 
 All requests must include the following headers:
 
 - `Authorization: Bearer <RL_SECRET>`
-- `X-Timestamp: <current_unix_timestamp_in_ms>`
+- `X-Timestamp: <current_unix_timestamp_in_ms>` (as string)
 - `X-Signature: <hmac_sha256_signature>`
 
-Signature calculation: `HMAC-SHA256(RL_SECRET, client_ip + ":" + timestamp)`
+Signature calculation: `HMAC-SHA256(RL_SECRET, timestamp.toString())` and encode the result as hex or base64 (the code uses hex)
 
 Example (JavaScript):
 
@@ -85,12 +84,11 @@ Example (JavaScript):
 const crypto = require("crypto");
 
 const secret = "your-secret-key";
-const clientIP = "192.168.1.1"; // Real client IP
 const timestamp = Date.now();
 
 const signature = crypto
   .createHmac("sha256", secret)
-  .update(`${clientIP}:${timestamp}`)
+  .update(timestamp.toString())
   .digest("hex");
 ```
 
@@ -156,7 +154,7 @@ const signature = crypto
 ```bash
 # Calculate signature first (example values)
 TIMESTAMP=$(date +%s%3N)
-SIGNATURE=$(echo -n "127.0.0.1:$TIMESTAMP" | openssl dgst -sha256 -hmac "your-secret-key" | cut -d' ' -f2)
+SIGNATURE=$(echo -n "$TIMESTAMP" | openssl dgst -sha256 -hmac "your-secret-key" | cut -d' ' -f2)
 
 curl -X POST http://localhost:3001/ratelimit \
   -H "Authorization: Bearer your-secret-key" \
@@ -187,13 +185,10 @@ curl -X POST http://localhost:3001/ratelimit \
 
    ```javascript
    const timestamp = Date.now();
-   const clientIP = pm.request.headers.get("X-Forwarded-For") || "127.0.0.1"; // Or real IP
    const secret = "your-secret-key";
 
    const crypto = require("crypto-js");
-   const signature = crypto
-     .HmacSHA256(`${clientIP}:${timestamp}`, secret)
-     .toString();
+   const signature = crypto.HmacSHA256(timestamp.toString(), secret).toString();
 
    pm.globals.set("timestamp", timestamp);
    pm.globals.set("signature", signature);
@@ -211,7 +206,6 @@ curl -X POST http://localhost:3001/ratelimit \
 
 - Keep `RL_SECRET` strong and secret.
 - Requests expire within 30 seconds (clock skew protection).
-- The proxy rate-limits itself (50 RPS per IP).
 
 ## Troubleshooting
 
@@ -225,7 +219,7 @@ curl -X POST http://localhost:3001/ratelimit \
 - "Unauthorized": Incorrect `Authorization` header.
 - "Missing signature": Missing `X-Timestamp` or `X-Signature`.
 - "Expired request": Request older than 30 seconds.
-- "Invalid signature": Incorrectly calculated signature. Check client IP and timestamp.
+- "Invalid signature": Incorrectly calculated signature. Check timestamp.
 
 ### Rate Limiting Not Working
 

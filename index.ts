@@ -63,7 +63,6 @@ connectRedis();
 ======================= */
 const SHARED_SECRET = process.env.RL_SECRET!;
 const MAX_CLOCK_SKEW_MS = 30_000; // 30 sn
-const PROXY_RPS = 50; // proxy'yi korumak için
 
 /* =======================
    REDIS LUA SCRIPT (Atomic INCR + EXPIRE)
@@ -87,27 +86,6 @@ return {current, ttl}
 ======================= */
 function hmac(data: string) {
   return crypto.createHmac("sha256", SHARED_SECRET).update(data).digest("hex");
-}
-
-// Gerçek client IP'sini al (Cloudflare, proxy, vb.)
-function getClientIP(req: any): string {
-  // Cloudflare
-  const cfIP = req.headers["cf-connecting-ip"];
-  if (cfIP) return Array.isArray(cfIP) ? cfIP[0] : cfIP;
-
-  // X-Forwarded-For (ilk IP gerçek client)
-  const xff = req.headers["x-forwarded-for"];
-  if (xff) {
-    const ips = (Array.isArray(xff) ? xff[0] : xff).split(",");
-    return ips[0].trim();
-  }
-
-  // X-Real-IP (nginx vb.)
-  const realIP = req.headers["x-real-ip"];
-  if (realIP) return Array.isArray(realIP) ? realIP[0] : realIP;
-
-  // Fallback
-  return req.ip;
 }
 
 // Rate limit işlemi (Redis veya Memory)
@@ -155,20 +133,6 @@ async function rateLimit(
 }
 
 /* =======================
-   PROXY RATE LIMIT (SELF)
-======================= */
-app.addHook("onRequest", async (req, reply) => {
-  const ip = getClientIP(req);
-  const key = `proxy_rl:${ip}`;
-
-  const { current } = await rateLimit(key, PROXY_RPS, 1);
-
-  if (current > PROXY_RPS) {
-    return reply.status(429).send({ error: "Proxy rate limit" });
-  }
-});
-
-/* =======================
    AUTH + HMAC GUARD
 ======================= */
 app.addHook("preHandler", async (req, reply) => {
@@ -197,8 +161,7 @@ app.addHook("preHandler", async (req, reply) => {
     return reply.status(401).send({ error: "Expired request" });
   }
 
-  const clientIP = getClientIP(req);
-  const expected = hmac(`${clientIP}:${ts}`);
+  const expected = hmac(ts.toString());
   if (sig !== expected) {
     return reply.status(401).send({ error: "Invalid signature" });
   }
