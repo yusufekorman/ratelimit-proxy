@@ -61,8 +61,22 @@ connectRedis();
 /* =======================
    CONFIG
 ======================= */
-const SHARED_SECRET = process.env.RL_SECRET!;
+if (!process.env.RL_SECRET) {
+  console.error("❌ FATAL: RL_SECRET environment variable is required!");
+  process.exit(1);
+}
+
+const SHARED_SECRET = process.env.RL_SECRET;
 const MAX_CLOCK_SKEW_MS = 30_000; // 30 sn
+
+console.log("✅ Rate Limit Service Configuration:", {
+  redisUrl: process.env.REDIS_URL
+    ? "Configured"
+    : "Not configured (using memory)",
+  secretLength: SHARED_SECRET.length,
+  maxClockSkew: MAX_CLOCK_SKEW_MS,
+  port: 3001,
+});
 
 /* =======================
    REDIS LUA SCRIPT (Atomic INCR + EXPIRE)
@@ -179,15 +193,25 @@ const rateLimitSchema = Joi.object({
 app.post("/ratelimit", async (req, reply) => {
   const { error, value } = rateLimitSchema.validate(req.body);
   if (error) {
+    console.warn("[VALIDATION ERROR]", error.details?.[0]?.message);
     return reply
       .status(400)
       .send({ error: error.details?.[0]?.message || "Validation error" });
   }
 
   const { key, points = 100, duration = 60 } = value;
+  console.log("[RATE LIMIT CHECK]", { key, points, duration });
 
   const redisKey = `rl:${key}`;
   const { current, ttl } = await rateLimit(redisKey, points, duration);
+
+  console.log("[RATE LIMIT RESULT]", {
+    key,
+    current,
+    points,
+    allowed: current <= points,
+    ttl,
+  });
 
   if (current > points) {
     return reply.status(429).send({
@@ -206,12 +230,18 @@ app.post("/ratelimit", async (req, reply) => {
    HEALTH CHECK
 ======================= */
 app.get("/health", async () => {
+  // get all rl:* keys
+
+  const keys = redisConnected ? await redis!.keys("rl:*") : [];
+
+  console.log(`[HEALTH CHECK] Rate limit keys count: ${keys.length}`);
+
   return {
     status: "ok",
     redis: redisConnected
       ? "connected"
       : "disconnected (using memory fallback)",
-    memoryStoreSize: memoryStore.size,
+    keys,
   };
 });
 
